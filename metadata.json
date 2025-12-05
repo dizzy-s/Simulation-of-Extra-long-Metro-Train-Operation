@@ -1,0 +1,5 @@
+{
+  "name": "Metro Sim",
+  "description": "A metro train operation simulation demonstrating selective door operation (SDO) with specific block alignments across 4 stations.",
+  "requestFramePermissions": []
+}
