@@ -30,7 +30,7 @@ export const RailCar: React.FC<RailCarProps> = ({ color, isDoorOpen, isActive, i
     >
       {/* Load Number Indicator - High Contrast - Scaled Up */}
       <div className={`flex items-center justify-center w-5 h-5 rounded-full mt-[-10px] border border-white/20 shadow-sm ${occupant ? 'bg-green-500 text-white' : 'bg-slate-900/80 text-slate-500'}`}>
-        <span className="text-[10px] font-black leading-none">
+        <span className="text-xs font-black leading-none">
             {occupant ? '1' : '0'}
         </span>
       </div>
@@ -48,8 +48,8 @@ export const RailCar: React.FC<RailCarProps> = ({ color, isDoorOpen, isActive, i
       </div>
 
       {/* Destination Indicator - Bottom (if occupied) */}
-       <div className="text-[7px] font-mono font-bold text-white/90 leading-none h-3.5 bg-black/20 w-full text-center flex items-center justify-center overflow-hidden whitespace-nowrap px-[1px]">
-        {occupant ? `To ${occupant.destId}` : ''}
+       <div className="text-[8px] font-mono font-bold text-white/90 leading-none h-3.5 bg-black/20 w-full text-center flex items-center justify-center overflow-hidden whitespace-nowrap px-[1px]">
+        {occupant ? `Stn ${occupant.destId}` : ''}
       </div>
 
 
@@ -58,8 +58,7 @@ export const RailCar: React.FC<RailCarProps> = ({ color, isDoorOpen, isActive, i
         <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-4 h-1.5 bg-green-400 animate-pulse rounded-full shadow-[0_0_8px_#4ade80]" />
       )}
       
-      {/* Car Number (Debug/Visual) */}
-      <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[8px] text-white/30">{indexInBlock + 1}</span>
+
     </div>
   );
 };

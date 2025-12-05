@@ -4,7 +4,9 @@ import {
   STATION_PADDING, 
   BLOCK_WIDTH_3, 
   BLOCK_WIDTH_4, 
-  TRAIN_COUPLER_GAP 
+  TRAIN_COUPLER_GAP,
+  TRAIN_BLOCKS,
+  STATIONS
 } from '../constants';
 import { WaitingGroup } from '../types';
 
@@ -76,18 +78,45 @@ export const StationPlatform: React.FC<StationPlatformProps> = ({ name, id, alig
     >
       {/* Platform Surface */}
       <div 
-        className="h-4 bg-slate-600 rounded-sm border-t-4 border-yellow-400 relative flex overflow-hidden shadow-xl"
+        className="h-8 bg-slate-800 rounded-sm border-t-4 border-yellow-400 relative flex overflow-hidden shadow-xl"
         style={{ width: '100%' }}
       >
-        {/* Alignment Indicator Text */}
-        <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center pointer-events-none">
-           <span className="text-[7px] text-slate-900 font-bold opacity-30 uppercase tracking-[0.2em]">
-             {alignment}
-           </span>
-        </div>
+        {/* Color Coded Zones on Platform Floor with Labels */}
+        {zones.map((zone) => {
+           const block = TRAIN_BLOCKS.find(b => b.id === zone.blockId);
+           const colorClass = block ? block.color : 'bg-slate-600';
+           
+           // Calculate destinations for this block from this station
+           const futureStations = STATIONS.filter(s => s.id > id);
+           const reachable = futureStations.filter(s => {
+             // Logic: Is this block active at station s?
+             const activeBlocks = s.alignment === 'rear' ? [1, 3] : [2, 3];
+             return activeBlocks.includes(zone.blockId);
+           });
+
+           const destText = reachable.length > 0
+             ? `To Stn ${reachable.map(s => s.id).join(',')}`
+             : "No Service";
+
+           return (
+             <div 
+               key={zone.blockId}
+               className="absolute top-0 bottom-0 flex items-center justify-center border-x border-white/5"
+               style={{ left: `${zone.left}px`, width: `${zone.width}px` }}
+             >
+                {/* Background Tint */}
+                <div className={`absolute inset-0 ${colorClass} opacity-30`}></div>
+                
+                {/* Destination Label */}
+                <div className="relative z-10 bg-slate-900/60 px-1 rounded-sm text-[8px] font-bold text-white/90 uppercase tracking-widest shadow-sm backdrop-blur-[1px] border border-white/10">
+                   {destText}
+                </div>
+             </div>
+           );
+        })}
         
-        {/* Subtle Texture/Pattern instead of mismatched grid lines */}
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPgo8cmVjdCB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9IjAuMDUiLz4KPC9zdmc+')] opacity-20"></div>
+        {/* Subtle Texture/Pattern */}
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPgo8cmVjdCB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9IjAuMDUiLz4KPC9zdmc+')] opacity-20 pointer-events-none"></div>
       </div>
 
       {/* Waiting Passenger Area - Spatially Aligned & Grouped */}
@@ -106,8 +135,8 @@ export const StationPlatform: React.FC<StationPlatformProps> = ({ name, id, alig
               {groups.map((group, idx) => (
                  <div key={`${group.destId}-${idx}`} className="flex flex-col items-center min-w-max">
                     {/* Demand Info */}
-                    <div className="mb-0.5 bg-black/70 px-1.5 py-0.5 rounded text-[8px] font-mono text-white whitespace-nowrap opacity-90 border border-white/10 shadow-sm z-50">
-                      {group.count} To {group.destId}
+                    <div className="mb-0.5 bg-black/70 px-1.5 py-0.5 rounded text-[10px] font-mono text-white whitespace-nowrap opacity-90 border border-white/10 shadow-sm z-50">
+                      To Stn {group.destId}
                     </div>
 
                     {/* Crowd Icons */}
@@ -131,7 +160,7 @@ export const StationPlatform: React.FC<StationPlatformProps> = ({ name, id, alig
 
       {/* Station Name Board */}
       <div className={`px-2 py-0.5 rounded border border-slate-600 transition-colors whitespace-nowrap ${isActive ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/50' : 'bg-slate-800 text-slate-400'}`}>
-        <span className="text-[10px] font-bold uppercase tracking-wider">{name}</span>
+        <span className="text-xs font-bold uppercase tracking-wider">{name}</span>
       </div>
     </div>
   );

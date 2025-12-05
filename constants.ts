@@ -20,7 +20,7 @@ export const BLOCK_WIDTH_4 = getBlockWidth(4); // ~145px
 export const TRAIN_ACTIVE_SEGMENT_WIDTH = BLOCK_WIDTH_3 + TRAIN_COUPLER_GAP + BLOCK_WIDTH_4;
 
 // Padding on each side of the train when centered in station
-export const STATION_PADDING = 12;
+export const STATION_PADDING = 1;
 
 // Total Station Width
 export const STATION_PIXEL_WIDTH = TRAIN_ACTIVE_SEGMENT_WIDTH + (STATION_PADDING * 2);
@@ -30,7 +30,7 @@ export const STATION_PIXEL_WIDTH = TRAIN_ACTIVE_SEGMENT_WIDTH + (STATION_PADDING
 export const TRAIN_BLOCKS: TrainBlock[] = [
   { id: 1, capacity: 3, color: 'bg-rose-500', name: 'Block 1' },
   { id: 3, capacity: 4, color: 'bg-amber-500', name: 'Block 3' },
-  { id: 2, capacity: 3, color: 'bg-emerald-500', name: 'Block 2' },
+  { id: 2, capacity: 3, color: 'bg-blue-500', name: 'Block 2' },
 ];
 
 // Helper to find car index range for a block

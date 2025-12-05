@@ -32,7 +32,7 @@ export const Train: React.FC<TrainProps> = ({ x, doorsOpen, activeBlockIds, carO
             
             {/* Block Label */}
             <div className="absolute -top-7 left-0 w-full text-center opacity-0 group-hover:opacity-100 transition-opacity">
-               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${activeBlockIds.includes(block.id) ? 'bg-white text-black' : 'bg-slate-700 text-slate-400'}`}>
+               <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${activeBlockIds.includes(block.id) ? 'bg-white text-black' : 'bg-slate-700 text-slate-400'}`}>
                  {block.name}
                </span>
             </div>

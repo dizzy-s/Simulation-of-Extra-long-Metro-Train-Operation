@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Train } from './components/Train';
 import { StationPlatform } from './components/StationPlatform';
 import { Controls } from './components/Controls';
+import { Header } from './components/Header';
 import { 
   TRAIN_BLOCKS, 
   STATIONS, 
@@ -23,7 +24,7 @@ const App: React.FC = () => {
   const [trainX, setTrainX] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [speedMultiplier, setSpeedMultiplier] = useState(1);
-  const [message, setMessage] = useState("Ready to start simulation.");
+  const [message, setMessage] = useState("Ready to start.");
   const [activeStationId, setActiveStationId] = useState<number | null>(null);
   const [doorsOpen, setDoorsOpen] = useState(false);
   const [activeBlockIds, setActiveBlockIds] = useState<number[]>([]);
@@ -50,7 +51,7 @@ const App: React.FC = () => {
     activeStationId: null as number | null,
     doorsOpen: false,
     activeBlockIds: [] as number[],
-    message: "Ready to start simulation."
+    message: "Ready to start."
   });
 
   // ---- Refs for Animation Loop ----
@@ -87,7 +88,7 @@ const App: React.FC = () => {
     simRef.current.activeStationId = null;
     simRef.current.doorsOpen = false;
     simRef.current.activeBlockIds = [];
-    simRef.current.message = "Ready to start simulation.";
+    simRef.current.message = "Ready to start.";
 
     // Sync to State
     setWaitingLoads(initialWaiting);
@@ -96,7 +97,7 @@ const App: React.FC = () => {
     setActiveStationId(null);
     setDoorsOpen(false);
     setActiveBlockIds([]);
-    setMessage("Ready to start simulation.");
+    setMessage("Ready to start.");
   };
 
   useEffect(() => {
@@ -332,14 +333,7 @@ const App: React.FC = () => {
   return (
     <div className="h-screen w-screen bg-slate-950 text-slate-200 font-sans flex flex-col overflow-hidden relative">
       
-      <div className="absolute top-0 left-0 w-full p-6 z-40 pointer-events-none">
-        <h1 className="text-xl font-black tracking-tighter text-white drop-shadow-lg">METRO OPS <span className="text-blue-500">SIM</span></h1>
-        <p className="text-slate-400 text-xs mt-1 font-medium bg-slate-900/50 inline-block px-2 py-1 rounded backdrop-blur-sm border border-slate-700/50">
-          10-car Train vs 7-car Platforms. 
-          <span className="ml-2 text-rose-400">Rear Align (Stn 1,3)</span>
-          <span className="ml-2 text-emerald-400">Front Align (Stn 2,4)</span>
-        </p>
-      </div>
+      <Header />
 
       {/* Main Track Container - Full Screen Area */}
       <div className="flex-1 w-full relative bg-slate-900/30 overflow-hidden flex items-center justify-center">
