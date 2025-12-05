@@ -1,16 +1,17 @@
 import React from 'react';
-import { TRAIN_BLOCKS, TRAIN_COUPLER_GAP, TRAIN_CAB_WIDTH } from '../constants';
+import { TRAIN_COUPLER_GAP, TRAIN_CAB_WIDTH, CAR_GAP } from '../constants';
 import { RailCar } from './RailCar';
-import { OnboardPassenger } from '../types';
+import { OnboardPassenger, TrainBlock } from '../types';
 
 interface TrainProps {
   x: number; 
   doorsOpen: boolean;
   activeBlockIds: number[]; 
-  carOccupancy: (OnboardPassenger | null)[]; 
+  carOccupancy: (OnboardPassenger | null)[];
+  blocks: TrainBlock[];
 }
 
-export const Train: React.FC<TrainProps> = ({ x, doorsOpen, activeBlockIds, carOccupancy }) => {
+export const Train: React.FC<TrainProps> = ({ x, doorsOpen, activeBlockIds, carOccupancy, blocks }) => {
   // We need to map linear car indices (0-9) to blocks
   let carIndexCounter = 0;
 
@@ -24,8 +25,8 @@ export const Train: React.FC<TrainProps> = ({ x, doorsOpen, activeBlockIds, carO
       }}
     >
       {/* Render blocks in order */}
-      {TRAIN_BLOCKS.map((block, index) => {
-        const isLastBlock = index === TRAIN_BLOCKS.length - 1;
+      {blocks.map((block, index) => {
+        const isLastBlock = index === blocks.length - 1;
         
         return (
           <div key={block.id} className="flex items-center relative group">
@@ -41,6 +42,7 @@ export const Train: React.FC<TrainProps> = ({ x, doorsOpen, activeBlockIds, carO
             {Array.from({ length: block.capacity }).map((_, i) => {
               const globalCarIndex = carIndexCounter++;
               const occupant = carOccupancy[globalCarIndex];
+              const isLastInBlock = i === block.capacity - 1;
 
               return (
                 <RailCar 
@@ -50,6 +52,8 @@ export const Train: React.FC<TrainProps> = ({ x, doorsOpen, activeBlockIds, carO
                   isActive={activeBlockIds.includes(block.id)}
                   indexInBlock={i}
                   occupant={occupant}
+                  // Remove margin for the last car in the block to match geometry width exactly
+                  marginRight={isLastInBlock ? 0 : CAR_GAP}
                 />
               );
             })}
@@ -69,7 +73,8 @@ export const Train: React.FC<TrainProps> = ({ x, doorsOpen, activeBlockIds, carO
       {/* Locomotive / Cab Front - Modern Metro Design - Scaled Height to h-14 */}
       <div 
         className="flex items-center"
-        style={{ width: `${TRAIN_CAB_WIDTH + 6}px`, marginLeft: '-1px', zIndex: 30 }}
+        // Add marginLeft to separate from the last car which now has 0 margin
+        style={{ width: `${TRAIN_CAB_WIDTH + 6}px`, marginLeft: `${CAR_GAP}px`, zIndex: 30 }}
       >
         <svg viewBox="0 0 32 48" className="w-full h-14" style={{ filter: 'drop-shadow(3px 3px 3px rgba(0,0,0,0.5))' }}>
             <defs>

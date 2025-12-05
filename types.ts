@@ -9,7 +9,7 @@ export interface TrainBlock {
 export interface Station {
   id: number;
   name: string;
-  alignment: 'rear' | 'front'; // Rear align uses Blocks 1&3, Front uses 2&3
+  alignment: 'rear' | 'front' | 'all'; // 'all' added for standard alignment (left-aligned usually)
   positionX: number; // Relative position on the track (0-1000 scale)
 }
 

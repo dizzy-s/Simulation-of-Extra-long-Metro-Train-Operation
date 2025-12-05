@@ -5,13 +5,16 @@ import { Controls } from './components/Controls';
 import { Header } from './components/Header';
 import { 
   TRAIN_BLOCKS, 
+  REGULAR_TRAIN_BLOCKS,
   STATIONS, 
   TRACK_LENGTH, 
   getTrainEffectiveLength,
   STATION_PIXEL_WIDTH,
   STATION_PADDING,
   PASSENGER_DEMAND,
-  getBlockIndices
+  getBlockIndices,
+  TRAIN_ACTIVE_SEGMENT_WIDTH,
+  BLOCK_WIDTH_7
 } from './constants';
 import { WaitingGroup, OnboardPassenger } from './types';
 
@@ -20,7 +23,6 @@ const cloneJSON = <T,>(data: T): T => JSON.parse(JSON.stringify(data));
 
 const App: React.FC = () => {
   // ---- React State (For Rendering Only) ----
-  // These are updated from the simulation loop to trigger re-renders
   const [trainX, setTrainX] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [speedMultiplier, setSpeedMultiplier] = useState(1);
@@ -30,9 +32,11 @@ const App: React.FC = () => {
   const [activeBlockIds, setActiveBlockIds] = useState<number[]>([]);
   const [waitingLoads, setWaitingLoads] = useState<Record<number, WaitingGroup[]>>({});
   const [carOccupancy, setCarOccupancy] = useState<(OnboardPassenger | null)[]>(Array(10).fill(null));
+  
+  // New State for Mode
+  const [trainMode, setTrainMode] = useState<'long' | 'regular'>('long');
 
   // ---- Simulation State (Mutable Ref) ----
-  // This holds the "source of truth" for the animation loop to avoid stale closures
   const simRef = useRef({
     trainX: 0,
     isPlaying: false,
@@ -42,8 +46,9 @@ const App: React.FC = () => {
     lastStationId: null as number | null,
     boardingProcessed: false,
     alightingProcessed: false,
+    trainMode: 'long' as 'long' | 'regular',
     
-    // Data structures mirrored in Ref for synchronous access
+    // Data structures mirrored in Ref
     waitingLoads: {} as Record<number, WaitingGroup[]>,
     carOccupancy: Array(10).fill(null) as (OnboardPassenger | null)[],
     
@@ -59,28 +64,46 @@ const App: React.FC = () => {
   const lastTimeRef = useRef<number | undefined>(undefined);
 
   // ---- Initialization Logic ----
-  const initializePassengers = () => {
-    const initialWaiting: Record<number, WaitingGroup[]> = {};
+  // mode parameter allows forcing a mode initialization (e.g. on switch)
+  const initializePassengers = (mode: 'long' | 'regular' = 'long', resetTrainOnly: boolean = false) => {
     
-    PASSENGER_DEMAND.forEach(demand => {
-      const block = TRAIN_BLOCKS.find(b => b.id === demand.assignedBlockId);
-      const color = block ? block.color : 'bg-gray-500';
-      
-      if (!initialWaiting[demand.originId]) {
-        initialWaiting[demand.originId] = [];
-      }
-      initialWaiting[demand.originId].push({
-        destId: demand.destId,
-        blockId: demand.assignedBlockId,
-        count: demand.carloads,
-        color: color
-      });
-    });
+    // If we are just resetting the train loop (Regular mode loop 2), 
+    // we DON'T reset waiting loads.
+    let initialWaiting = simRef.current.waitingLoads;
 
-    const initialOccupancy = Array(10).fill(null);
+    if (!resetTrainOnly) {
+        initialWaiting = {};
+        PASSENGER_DEMAND.forEach(demand => {
+          // If Regular mode, everyone uses Block 99.
+          // If Long mode, use assigned block.
+          const effectiveBlockId = mode === 'regular' ? 99 : demand.assignedBlockId;
+          
+          let block = TRAIN_BLOCKS.find(b => b.id === effectiveBlockId);
+          if (mode === 'regular') block = REGULAR_TRAIN_BLOCKS[0];
+
+          const color = block ? block.color : 'bg-gray-500';
+          
+          if (!initialWaiting[demand.originId]) {
+            initialWaiting[demand.originId] = [];
+          }
+          initialWaiting[demand.originId].push({
+            destId: demand.destId,
+            blockId: effectiveBlockId,
+            count: demand.carloads,
+            color: color
+          });
+        });
+    }
+
+    const trainCapacity = mode === 'regular' ? 7 : 10;
+    const initialOccupancy = Array(trainCapacity).fill(null);
 
     // Update Ref
-    simRef.current.waitingLoads = cloneJSON(initialWaiting);
+    if (!resetTrainOnly) {
+      simRef.current.waitingLoads = cloneJSON(initialWaiting);
+      setWaitingLoads(initialWaiting);
+    }
+    
     simRef.current.carOccupancy = initialOccupancy;
     simRef.current.trainX = 0;
     simRef.current.lastStationId = null;
@@ -88,21 +111,21 @@ const App: React.FC = () => {
     simRef.current.activeStationId = null;
     simRef.current.doorsOpen = false;
     simRef.current.activeBlockIds = [];
-    simRef.current.message = "Ready to start.";
+    simRef.current.message = resetTrainOnly ? "Train 2 Starting..." : "Ready to start.";
+    simRef.current.trainMode = mode;
 
     // Sync to State
-    setWaitingLoads(initialWaiting);
     setCarOccupancy(initialOccupancy);
     setTrainX(0);
     setActiveStationId(null);
     setDoorsOpen(false);
     setActiveBlockIds([]);
-    setMessage("Ready to start.");
+    setMessage(simRef.current.message);
   };
 
   useEffect(() => {
-    initializePassengers();
-  }, []);
+    initializePassengers(trainMode);
+  }, [trainMode]);
 
   // Update Ref when user controls change state
   useEffect(() => {
@@ -111,15 +134,22 @@ const App: React.FC = () => {
   }, [isPlaying, speedMultiplier]);
 
   // ---- Physics Logic ----
-  const trainEffectiveLen = getTrainEffectiveLength();
+  const trainEffectiveLen = getTrainEffectiveLength(trainMode);
 
   const getStopPosition = (station: typeof STATIONS[0]) => {
-    if (station.alignment === 'rear') {
-      // Align Start of Train to Start of Station + Padding (Centering)
+    if (trainMode === 'regular') {
+        // Regular train platform is resized to BLOCK_WIDTH_7 in StationPlatform
+        // So we just stop at the padding start
+        return station.positionX + STATION_PADDING;
+    }
+
+    // Long Train SDO Logic:
+    // Rear: Aligns Left
+    // All: Aligns Left (Defaulting to same as Rear for simplicity & 7-car consistency)
+    // Front: Aligns Right
+    if (station.alignment === 'rear' || station.alignment === 'all') {
       return station.positionX + STATION_PADDING;
     } else {
-      // Align End of Train to End of Station - Padding (Centering)
-      // trainX + len = stationX + width - padding
       return (station.positionX + STATION_PIXEL_WIDTH - STATION_PADDING) - trainEffectiveLen;
     }
   };
@@ -139,12 +169,18 @@ const App: React.FC = () => {
       if (elapsed > 500 && elapsed < waitDuration && !sim.doorsOpen) {
         sim.doorsOpen = true;
         if (station) {
-           if (station.alignment === 'rear') {
-             sim.activeBlockIds = [1, 3];
-             sim.message = `${station.name}: Rear Align. Blocks 1 & 3 Open.`;
+           if (sim.trainMode === 'regular') {
+               sim.activeBlockIds = [99];
+               sim.message = `${station.name}: Doors Open.`;
            } else {
-             sim.activeBlockIds = [2, 3];
-             sim.message = `${station.name}: Front Align. Blocks 2 & 3 Open.`;
+               // Long Train Logic
+               if (station.alignment === 'rear' || station.alignment === 'all') {
+                 sim.activeBlockIds = [1, 3];
+                 sim.message = `${station.name}: Rear Align. Blocks 1 & 3 Open.`;
+               } else {
+                 sim.activeBlockIds = [2, 3];
+                 sim.message = `${station.name}: Front Align. Blocks 2 & 3 Open.`;
+               }
            }
         }
         // Sync UI
@@ -162,19 +198,19 @@ const App: React.FC = () => {
 
         for (let i = 0; i < nextOccupancy.length; i++) {
             const occupant = nextOccupancy[i];
-            // Check occupant destination
             if (occupant && occupant.destId === currentStationId) {
               
-              // Only allow alighting if the block door is open!
-              // Determine block ID for this car index manually or via helper
               let blockId = 0;
-              if (i < 3) blockId = 1;      // Cars 0-2: Block 1
-              else if (i < 7) blockId = 3; // Cars 3-6: Block 3
-              else blockId = 2;            // Cars 7-9: Block 2
+              if (sim.trainMode === 'regular') {
+                  blockId = 99;
+              } else {
+                  if (i < 3) blockId = 1;      
+                  else if (i < 7) blockId = 3; 
+                  else blockId = 2;            
+              }
 
-              // Check if this block is active
               if (sim.activeBlockIds.includes(blockId)) {
-                nextOccupancy[i] = null; // Passenger leaves
+                nextOccupancy[i] = null; 
                 alightedCount++;
               }
             }
@@ -196,15 +232,15 @@ const App: React.FC = () => {
         const stationGroups = sim.waitingLoads[currentStationId] || [];
         const remainingGroups: WaitingGroup[] = [];
         let boardedTotal = 0;
+        let leftBehindTotal = 0;
 
         // Clone groups to modify counts safely
         const groupsToProcess = stationGroups.map(g => ({...g}));
 
         groupsToProcess.forEach(group => {
             // STRICT CHECK: Can this group board at this station?
-            // Only if their assigned block is currently active
             if (!sim.activeBlockIds.includes(group.blockId)) {
-                remainingGroups.push(group); // Keep waiting
+                remainingGroups.push(group); 
                 return;
             }
 
@@ -212,8 +248,8 @@ const App: React.FC = () => {
             
             // Try to fill empty spots in the assigned block
             for (const idx of blockIndices) {
-               if (group.count > 0 && nextOccupancy[idx] === null) {
-                 // Assign passenger
+               // Ensure we don't exceed train bounds (Regular train is smaller)
+               if (idx < nextOccupancy.length && group.count > 0 && nextOccupancy[idx] === null) {
                  nextOccupancy[idx] = { 
                     destId: group.destId, 
                     color: group.color 
@@ -224,6 +260,7 @@ const App: React.FC = () => {
             }
             
             if (group.count > 0) {
+              leftBehindTotal += group.count;
               remainingGroups.push(group);
             }
         });
@@ -236,10 +273,12 @@ const App: React.FC = () => {
         setWaitingLoads(sim.waitingLoads);
         setCarOccupancy(nextOccupancy);
 
-        if (boardedTotal > 0) {
+        if (leftBehindTotal > 0 && sim.trainMode === 'regular') {
+            sim.message = `Full! ${leftBehindTotal} carloads waiting for next train.`;
+        } else if (boardedTotal > 0) {
             sim.message = `Boarding: ${boardedTotal} carloads boarded.`;
-            setMessage(sim.message);
         }
+        setMessage(sim.message);
       }
 
       // 4. Departure (at end)
@@ -297,11 +336,21 @@ const App: React.FC = () => {
       setMessage(`Arriving at ${stopStation.name}...`);
     } else {
       if (nextX > TRACK_LENGTH) {
-        nextX = 0;
-        sim.lastStationId = null;
-        sim.message = "Route Complete. Resetting...";
-        setMessage("Route Complete. Resetting...");
-        initializePassengers(); // Resets refs and state
+        // Route Complete
+        // If Regular mode and passengers are waiting, loop again without resetting demand
+        const hasWaiting = Object.values(sim.waitingLoads).some(groups => groups.length > 0);
+        
+        if (sim.trainMode === 'regular' && hasWaiting) {
+             sim.message = "Route Complete. Sending Train 2...";
+             setMessage("Route Complete. Sending Train 2...");
+             initializePassengers('regular', true); // resetTrainOnly = true
+        } else {
+             nextX = 0;
+             sim.lastStationId = null;
+             sim.message = "Route Complete. Resetting...";
+             setMessage("Route Complete. Resetting...");
+             initializePassengers(sim.trainMode); // Full reset
+        }
       } else {
         sim.trainX = nextX;
         setTrainX(nextX);
@@ -327,7 +376,7 @@ const App: React.FC = () => {
 
   const handleReset = () => {
     setIsPlaying(false);
-    initializePassengers(); // Fully resets refs and state
+    initializePassengers(trainMode);
   };
 
   return (
@@ -357,6 +406,7 @@ const App: React.FC = () => {
                     {...station}
                     isActive={activeStationId === station.id}
                     waitingGroups={waitingLoads[station.id] || []}
+                    trainMode={trainMode}
                   />
                 ))}
 
@@ -365,6 +415,7 @@ const App: React.FC = () => {
                   doorsOpen={doorsOpen} 
                   activeBlockIds={activeBlockIds}
                   carOccupancy={carOccupancy}
+                  blocks={trainMode === 'regular' ? REGULAR_TRAIN_BLOCKS : TRAIN_BLOCKS}
                 />
               </div>
            </div>
@@ -378,6 +429,8 @@ const App: React.FC = () => {
         speed={speedMultiplier}
         onSpeedChange={setSpeedMultiplier}
         statusMessage={message}
+        trainMode={trainMode}
+        onTrainModeChange={setTrainMode}
       />
     </div>
   );

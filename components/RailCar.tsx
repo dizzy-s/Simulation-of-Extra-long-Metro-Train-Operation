@@ -8,6 +8,7 @@ interface RailCarProps {
   isActive: boolean;
   indexInBlock: number;
   occupant: OnboardPassenger | null; 
+  marginRight?: number; // Optional prop to override default gap
 }
 
 // Simple Person Icon Component - Scaled Up
@@ -18,14 +19,17 @@ const PersonIcon = ({ color }: { color: string }) => (
   </svg>
 );
 
-export const RailCar: React.FC<RailCarProps> = ({ color, isDoorOpen, isActive, indexInBlock, occupant }) => {
+export const RailCar: React.FC<RailCarProps> = ({ color, isDoorOpen, isActive, indexInBlock, occupant, marginRight }) => {
+  // Use provided marginRight if available, otherwise default to CAR_GAP
+  const effectiveMargin = marginRight !== undefined ? marginRight : CAR_GAP;
+
   return (
     <div
       // Increased height to h-14 (56px) for larger scale
       className={`relative h-14 flex flex-col items-center justify-between py-1 border border-slate-800 rounded-sm transition-all duration-300 ${color} ${isActive ? 'opacity-100 shadow-[0_0_20px_rgba(255,255,255,0.3)] z-10' : 'opacity-40'}`}
       style={{
         width: `${PIXELS_PER_CAR}px`,
-        marginRight: `${CAR_GAP}px`,
+        marginRight: `${effectiveMargin}px`,
       }}
     >
       {/* Load Number Indicator - High Contrast - Scaled Up */}

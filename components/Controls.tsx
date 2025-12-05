@@ -7,6 +7,8 @@ interface ControlsProps {
   speed: number;
   onSpeedChange: (speed: number) => void;
   statusMessage: string;
+  trainMode: 'long' | 'regular';
+  onTrainModeChange: (mode: 'long' | 'regular') => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({ 
@@ -15,7 +17,9 @@ export const Controls: React.FC<ControlsProps> = ({
   onReset, 
   speed,
   onSpeedChange,
-  statusMessage 
+  statusMessage,
+  trainMode,
+  onTrainModeChange
 }) => {
   return (
     <div className="fixed bottom-0 left-0 w-full bg-slate-800 border-t border-slate-700 p-6 flex flex-col md:flex-row items-center justify-between gap-6 z-50 shadow-2xl">
@@ -37,7 +41,7 @@ export const Controls: React.FC<ControlsProps> = ({
           ) : (
             <>
               <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-              START / RESUME
+              START
             </>
           )}
         </button>
@@ -50,8 +54,24 @@ export const Controls: React.FC<ControlsProps> = ({
         </button>
       </div>
 
+      {/* Mode Switcher */}
+      <div className="flex items-center bg-slate-900/50 p-1.5 rounded-lg border border-slate-700">
+          <button 
+             onClick={() => onTrainModeChange('regular')}
+             className={`px-4 py-2 rounded font-bold text-sm transition-all ${trainMode === 'regular' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+          >
+            7-Railcar (Regular)
+          </button>
+          <button 
+             onClick={() => onTrainModeChange('long')}
+             className={`px-4 py-2 rounded font-bold text-sm transition-all ${trainMode === 'long' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+          >
+            10-Railcar (Extra-long)
+          </button>
+      </div>
+
       {/* Status Display */}
-      <div className="flex-1 text-center">
+      <div className="flex-1 text-center hidden lg:block">
         <div className="inline-block bg-slate-900 px-6 py-2 rounded-lg border border-slate-700">
           <span className="text-blue-400 font-mono text-xl">{statusMessage}</span>
         </div>
@@ -59,7 +79,7 @@ export const Controls: React.FC<ControlsProps> = ({
 
       {/* Speed Control */}
       <div className="flex items-center gap-3 bg-slate-900/50 p-2 rounded-lg">
-        <span className="text-sm font-bold text-slate-400 uppercase">Sim Speed</span>
+        <span className="text-sm font-bold text-slate-400 uppercase">Speed</span>
         {[1, 2, 4].map(s => (
           <button
             key={s}

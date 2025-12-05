@@ -6,17 +6,20 @@ import {
   BLOCK_WIDTH_4, 
   TRAIN_COUPLER_GAP,
   TRAIN_BLOCKS,
-  STATIONS
+  STATIONS,
+  REGULAR_TRAIN_BLOCKS,
+  BLOCK_WIDTH_7
 } from '../constants';
 import { WaitingGroup } from '../types';
 
 interface StationPlatformProps {
   name: string;
   id: number;
-  alignment: 'rear' | 'front';
+  alignment: 'rear' | 'front' | 'all';
   positionX: number;
   isActive: boolean;
   waitingGroups: WaitingGroup[]; 
+  trainMode: 'long' | 'regular';
 }
 
 // Person Icon for Platform (Standing) - Scaled Up
@@ -27,17 +30,35 @@ const StandingPerson: React.FC<{ color: string }> = ({ color }) => (
   </svg>
 );
 
-export const StationPlatform: React.FC<StationPlatformProps> = ({ name, id, alignment, positionX, isActive, waitingGroups }) => {
+export const StationPlatform: React.FC<StationPlatformProps> = ({ name, id, alignment, positionX, isActive, waitingGroups, trainMode }) => {
   
+  // Dynamic width calculation to ensure exact alignment
+  const currentPlatformWidth = trainMode === 'regular' 
+    ? BLOCK_WIDTH_7 + (STATION_PADDING * 2) 
+    : STATION_PIXEL_WIDTH;
+
   // Define spatial zones using ABSOLUTE PIXEL positioning to align perfectly with train doors
   const getBlockZones = () => {
-    // Both Rear and Front alignments use the same 'centered' train segment logic
-    // We just need to know which block is on the left and which is on the right
-    // The Active Train Segment starts at `STATION_PADDING` px from left edge.
     
-    if (alignment === 'rear') {
-      // Rear Alignment: [Block 1 (3 cars)] -- [Block 3 (4 cars)]
-      // Block 1 is first.
+    if (trainMode === 'regular') {
+        // Regular Train: The whole platform is one zone (Block 99).
+        return [
+            {
+                blockId: 99,
+                left: STATION_PADDING,
+                width: BLOCK_WIDTH_7
+            }
+        ];
+    }
+
+    // 10-Car Train SDO Logic:
+    // Rear Align: [Block 1] -- [Block 3] (Aligned Left)
+    // Front Align: [Block 3] -- [Block 2] (Aligned Right relative to train, so Left on platform is Block 3)
+    // All Align: Treating as Left-Aligned (Rear-like) for 10-car to ensure consistent left-alignment visual requested by user.
+    //            So we use Blocks 1 & 3.
+    
+    if (alignment === 'rear' || alignment === 'all') {
+      // [Block 1 (3 cars)] -- [Block 3 (4 cars)]
       return [
         { 
           blockId: 1, 
@@ -52,7 +73,6 @@ export const StationPlatform: React.FC<StationPlatformProps> = ({ name, id, alig
       ];
     } else {
       // Front Alignment: [Block 3 (4 cars)] -- [Block 2 (3 cars)]
-      // Block 3 is first (Leftmost in the active segment).
       return [
         { 
           blockId: 3, 
@@ -72,31 +92,38 @@ export const StationPlatform: React.FC<StationPlatformProps> = ({ name, id, alig
 
   return (
     <div
-      // Anchored top-1/2 with mt-10. Train bottom is at ~center-24px. Platform top at ~center+40px.
-      className="absolute top-1/2 mt-10 flex flex-col items-center z-10"
-      style={{ left: `${positionX}px`, width: `${STATION_PIXEL_WIDTH}px` }}
+      className="absolute top-1/2 mt-10 flex flex-col items-center z-10 transition-all duration-500"
+      style={{ left: `${positionX}px`, width: `${currentPlatformWidth}px` }}
     >
       {/* Platform Surface */}
       <div 
-        className="h-8 bg-slate-800 rounded-sm border-t-4 border-yellow-400 relative flex overflow-hidden shadow-xl"
+        className="h-8 bg-slate-800 rounded-sm border-t-4 border-yellow-400 relative flex overflow-hidden shadow-xl transition-all duration-500"
         style={{ width: '100%' }}
       >
         {/* Color Coded Zones on Platform Floor with Labels */}
         {zones.map((zone) => {
-           const block = TRAIN_BLOCKS.find(b => b.id === zone.blockId);
+           let block = TRAIN_BLOCKS.find(b => b.id === zone.blockId);
+           if (!block) block = REGULAR_TRAIN_BLOCKS.find(b => b.id === zone.blockId);
+           
            const colorClass = block ? block.color : 'bg-slate-600';
            
            // Calculate destinations for this block from this station
            const futureStations = STATIONS.filter(s => s.id > id);
-           const reachable = futureStations.filter(s => {
-             // Logic: Is this block active at station s?
-             const activeBlocks = s.alignment === 'rear' ? [1, 3] : [2, 3];
-             return activeBlocks.includes(zone.blockId);
-           });
-
-           const destText = reachable.length > 0
-             ? `To Stn ${reachable.map(s => s.id).join(',')}`
-             : "No Service";
+           
+           let destText = "";
+           if (trainMode === 'regular') {
+              destText = futureStations.length > 0 ? "All Destinations" : "Terminus";
+           } else {
+               const reachable = futureStations.filter(s => {
+                 // Logic: Is this block active at station s?
+                 // If 'all', we treat it as supporting 1 & 3 (Rear SDO)
+                 const activeBlocks = (s.alignment === 'rear' || s.alignment === 'all') ? [1, 3] : [2, 3];
+                 return activeBlocks.includes(zone.blockId);
+               });
+               destText = reachable.length > 0
+                 ? `To Stn ${reachable.map(s => s.id).join(',')}`
+                 : "No Service";
+           }
 
            return (
              <div 
