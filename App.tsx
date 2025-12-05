@@ -33,10 +33,10 @@ const App: React.FC = () => {
   const [waitingLoads, setWaitingLoads] = useState<Record<number, WaitingGroup[]>>({});
   const [carOccupancy, setCarOccupancy] = useState<(OnboardPassenger | null)[]>(Array(10).fill(null));
   
-  // New State for Mode
   const [trainMode, setTrainMode] = useState<'long' | 'regular'>('long');
 
   // ---- Simulation State (Mutable Ref) ----
+  // We keep all mutable state in a ref to ensure the loop runs smoothly without closure staleness
   const simRef = useRef({
     trainX: 0,
     isPlaying: false,
@@ -64,18 +64,13 @@ const App: React.FC = () => {
   const lastTimeRef = useRef<number | undefined>(undefined);
 
   // ---- Initialization Logic ----
-  // mode parameter allows forcing a mode initialization (e.g. on switch)
   const initializePassengers = (mode: 'long' | 'regular' = 'long', resetTrainOnly: boolean = false) => {
-    
-    // If we are just resetting the train loop (Regular mode loop 2), 
-    // we DON'T reset waiting loads.
     let initialWaiting = simRef.current.waitingLoads;
 
     if (!resetTrainOnly) {
         initialWaiting = {};
         PASSENGER_DEMAND.forEach(demand => {
-          // If Regular mode, everyone uses Block 99.
-          // If Long mode, use assigned block.
+          // KEY: For regular, force assignedBlockId to 99
           const effectiveBlockId = mode === 'regular' ? 99 : demand.assignedBlockId;
           
           let block = TRAIN_BLOCKS.find(b => b.id === effectiveBlockId);
@@ -127,183 +122,119 @@ const App: React.FC = () => {
     initializePassengers(trainMode);
   }, [trainMode]);
 
-  // Update Ref when user controls change state
   useEffect(() => {
     simRef.current.isPlaying = isPlaying;
     simRef.current.speedMultiplier = speedMultiplier;
   }, [isPlaying, speedMultiplier]);
 
-  // ---- Physics Logic ----
-  const trainEffectiveLen = getTrainEffectiveLength(trainMode);
 
-  const getStopPosition = (station: typeof STATIONS[0]) => {
-    if (trainMode === 'regular') {
-        // Regular train platform is resized to BLOCK_WIDTH_7 in StationPlatform
-        // So we just stop at the padding start
-        return station.positionX + STATION_PADDING;
-    }
-
-    // Long Train SDO Logic:
-    // Rear: Aligns Left
-    // All: Aligns Left (Defaulting to same as Rear for simplicity & 7-car consistency)
-    // Front: Aligns Right
-    if (station.alignment === 'rear' || station.alignment === 'all') {
-      return station.positionX + STATION_PADDING;
-    } else {
-      return (station.positionX + STATION_PIXEL_WIDTH - STATION_PADDING) - trainEffectiveLen;
-    }
-  };
-
-  const updateSimulation = (time: number, deltaTime: number) => {
-    const sim = simRef.current; // Access mutable ref
-    if (!sim.isPlaying) return;
-
-    // --- Waiting / Station Operations Logic ---
+  // ==================================================================================
+  // BRANCH 1: REGULAR (7-CAR) LOGIC
+  // ==================================================================================
+  const runRegularSimulation = (sim: typeof simRef.current, time: number, deltaTime: number) => {
+    
+    // 1. Station Ops
     if (sim.isWaiting) {
-      const elapsed = time - sim.waitStartTime;
-      const waitDuration = 3000 / sim.speedMultiplier;
-      const currentStationId = sim.activeStationId!;
-      const station = STATIONS.find(s => s.id === currentStationId);
+       const elapsed = time - sim.waitStartTime;
+       const waitDuration = 3000 / sim.speedMultiplier;
+       const currentStationId = sim.activeStationId!;
+       const station = STATIONS.find(s => s.id === currentStationId);
 
-      // 1. Doors Open (at 500ms)
-      if (elapsed > 500 && elapsed < waitDuration && !sim.doorsOpen) {
-        sim.doorsOpen = true;
-        if (station) {
-           if (sim.trainMode === 'regular') {
-               sim.activeBlockIds = [99];
-               sim.message = `${station.name}: Doors Open.`;
-           } else {
-               // Long Train Logic
-               if (station.alignment === 'rear' || station.alignment === 'all') {
-                 sim.activeBlockIds = [1, 3];
-                 sim.message = `${station.name}: Rear Align. Blocks 1 & 3 Open.`;
-               } else {
-                 sim.activeBlockIds = [2, 3];
-                 sim.message = `${station.name}: Front Align. Blocks 2 & 3 Open.`;
+       // Doors Open
+       if (elapsed > 500 && elapsed < waitDuration && !sim.doorsOpen) {
+          sim.doorsOpen = true;
+          sim.activeBlockIds = [99]; // Always Block 99 for regular
+          sim.message = `${station?.name}: Doors Open.`;
+          setDoorsOpen(true);
+          setActiveBlockIds([99]);
+          setMessage(sim.message);
+       }
+
+       // Alighting
+       if (elapsed > 1000 && !sim.alightingProcessed) {
+           sim.alightingProcessed = true;
+           let alightedCount = 0;
+           const nextOccupancy = [...sim.carOccupancy];
+           for (let i = 0; i < nextOccupancy.length; i++) {
+               const occupant = nextOccupancy[i];
+               if (occupant && occupant.destId === currentStationId) {
+                   // For regular train, any door is Block 99. We are open.
+                   nextOccupancy[i] = null;
+                   alightedCount++;
                }
            }
-        }
-        // Sync UI
-        setDoorsOpen(true);
-        setActiveBlockIds(sim.activeBlockIds);
-        setMessage(sim.message);
-      }
+           sim.carOccupancy = nextOccupancy;
+           setCarOccupancy(nextOccupancy);
+           if (alightedCount > 0) {
+               sim.message = `Alighting: ${alightedCount} carloads.`;
+               setMessage(sim.message);
+           }
+       }
 
-      // 2. Alighting (at 1000ms)
-      if (elapsed > 1000 && !sim.alightingProcessed && currentStationId) {
-        sim.alightingProcessed = true;
-        
-        let alightedCount = 0;
-        const nextOccupancy = [...sim.carOccupancy];
+       // Boarding
+       if (elapsed > 1500 && !sim.boardingProcessed) {
+           sim.boardingProcessed = true;
+           const nextOccupancy = [...sim.carOccupancy];
+           const stationGroups = sim.waitingLoads[currentStationId] || [];
+           const remainingGroups: WaitingGroup[] = [];
+           let boardedTotal = 0;
+           let leftBehindTotal = 0;
 
-        for (let i = 0; i < nextOccupancy.length; i++) {
-            const occupant = nextOccupancy[i];
-            if (occupant && occupant.destId === currentStationId) {
-              
-              let blockId = 0;
-              if (sim.trainMode === 'regular') {
-                  blockId = 99;
-              } else {
-                  if (i < 3) blockId = 1;      
-                  else if (i < 7) blockId = 3; 
-                  else blockId = 2;            
-              }
-
-              if (sim.activeBlockIds.includes(blockId)) {
-                nextOccupancy[i] = null; 
-                alightedCount++;
-              }
-            }
-        }
-
-        if (alightedCount > 0) {
-            sim.message = `Alighting: ${alightedCount} carloads left.`;
-            setMessage(sim.message);
-        }
-        sim.carOccupancy = nextOccupancy;
-        setCarOccupancy(nextOccupancy);
-      }
-
-      // 3. Boarding (at 1500ms)
-      if (elapsed > 1500 && !sim.boardingProcessed && currentStationId) {
-        sim.boardingProcessed = true;
-
-        const nextOccupancy = [...sim.carOccupancy];
-        const stationGroups = sim.waitingLoads[currentStationId] || [];
-        const remainingGroups: WaitingGroup[] = [];
-        let boardedTotal = 0;
-        let leftBehindTotal = 0;
-
-        // Clone groups to modify counts safely
-        const groupsToProcess = stationGroups.map(g => ({...g}));
-
-        groupsToProcess.forEach(group => {
-            // STRICT CHECK: Can this group board at this station?
-            if (!sim.activeBlockIds.includes(group.blockId)) {
-                remainingGroups.push(group); 
-                return;
-            }
-
-            const blockIndices = getBlockIndices(group.blockId);
-            
-            // Try to fill empty spots in the assigned block
-            for (const idx of blockIndices) {
-               // Ensure we don't exceed train bounds (Regular train is smaller)
-               if (idx < nextOccupancy.length && group.count > 0 && nextOccupancy[idx] === null) {
-                 nextOccupancy[idx] = { 
-                    destId: group.destId, 
-                    color: group.color 
-                 };
-                 group.count--;
-                 boardedTotal++;
+           stationGroups.forEach(group => {
+               // Only board if group is for block 99 (which they all should be in regular mode)
+               if (group.blockId !== 99) {
+                   remainingGroups.push(group);
+                   return;
                }
-            }
-            
-            if (group.count > 0) {
-              leftBehindTotal += group.count;
-              remainingGroups.push(group);
-            }
-        });
 
-        // Update data
-        sim.waitingLoads = { ...sim.waitingLoads, [currentStationId]: remainingGroups };
-        sim.carOccupancy = nextOccupancy;
-        
-        // Sync UI
-        setWaitingLoads(sim.waitingLoads);
-        setCarOccupancy(nextOccupancy);
+               // Regular train has indices 0-6
+               const blockIndices = [0,1,2,3,4,5,6];
+               
+               for (const idx of blockIndices) {
+                   if (idx < nextOccupancy.length && group.count > 0 && nextOccupancy[idx] === null) {
+                       nextOccupancy[idx] = { destId: group.destId, color: group.color };
+                       group.count--;
+                       boardedTotal++;
+                   }
+               }
 
-        if (leftBehindTotal > 0 && sim.trainMode === 'regular') {
-            sim.message = `Full! ${leftBehindTotal} carloads waiting for next train.`;
-        } else if (boardedTotal > 0) {
-            sim.message = `Boarding: ${boardedTotal} carloads boarded.`;
-        }
-        setMessage(sim.message);
-      }
+               if (group.count > 0) {
+                   leftBehindTotal += group.count;
+                   remainingGroups.push(group);
+               }
+           });
 
-      // 4. Departure (at end)
-      if (elapsed > waitDuration) {
-        sim.doorsOpen = false;
-        sim.message = "Doors closing...";
-        setDoorsOpen(false);
-        setMessage("Doors closing...");
-        
-        if (elapsed > waitDuration + 1000) {
-           sim.isWaiting = false;
-           sim.lastStationId = sim.activeStationId;
-           sim.activeStationId = null;
-           sim.activeBlockIds = [];
-           sim.message = "Departing...";
-           
-           setActiveStationId(null);
-           setActiveBlockIds([]);
-           setMessage("Departing...");
-        }
-      }
-      return;
+           sim.waitingLoads = { ...sim.waitingLoads, [currentStationId]: remainingGroups };
+           sim.carOccupancy = nextOccupancy;
+           setWaitingLoads(sim.waitingLoads);
+           setCarOccupancy(nextOccupancy);
+           if (boardedTotal > 0) {
+               sim.message = `Boarding: ${boardedTotal} carloads.`;
+               setMessage(sim.message);
+           }
+       }
+
+       // Departure
+       if (elapsed > waitDuration) {
+           sim.doorsOpen = false;
+           sim.message = "Doors closing...";
+           setDoorsOpen(false);
+           setMessage(sim.message);
+           if (elapsed > waitDuration + 1000) {
+               sim.isWaiting = false;
+               sim.lastStationId = sim.activeStationId;
+               sim.activeStationId = null;
+               sim.activeBlockIds = [];
+               sim.message = "Departing...";
+               setActiveStationId(null);
+               setActiveBlockIds([]);
+               setMessage(sim.message);
+           }
+       }
+       return;
     }
 
-    // --- Moving Logic ---
+    // 2. Movement Logic (Regular)
     const moveAmount = (0.1 * deltaTime) * sim.speedMultiplier;
     let nextX = sim.trainX + moveAmount;
     let shouldStop = false;
@@ -311,50 +242,217 @@ const App: React.FC = () => {
     let snapX = 0;
 
     for (const station of STATIONS) {
-      if (station.id === sim.lastStationId) continue;
-
-      const targetX = getStopPosition(station);
-      // Check if we passed the stop position in this frame
-      if (sim.trainX < targetX && nextX >= targetX) {
-        shouldStop = true;
-        stopStation = station;
-        snapX = targetX;
-        break;
-      }
+        if (station.id === sim.lastStationId) continue;
+        
+        // Regular Train ALWAYS stops at Left Padding
+        const targetX = station.positionX + STATION_PADDING;
+        
+        if (sim.trainX < targetX && nextX >= targetX) {
+            shouldStop = true;
+            stopStation = station;
+            snapX = targetX;
+            break;
+        }
     }
 
     if (shouldStop && stopStation) {
-      sim.trainX = snapX;
-      sim.isWaiting = true;
-      sim.waitStartTime = time;
-      sim.boardingProcessed = false;
-      sim.alightingProcessed = false;
-      sim.activeStationId = stopStation.id;
-      
-      setTrainX(snapX);
-      setActiveStationId(stopStation.id);
-      setMessage(`Arriving at ${stopStation.name}...`);
+        sim.trainX = snapX;
+        sim.isWaiting = true;
+        sim.waitStartTime = time;
+        sim.boardingProcessed = false;
+        sim.alightingProcessed = false;
+        sim.activeStationId = stopStation.id;
+        setTrainX(snapX);
+        setActiveStationId(stopStation.id);
+        setMessage(`Arriving at ${stopStation.name}...`);
     } else {
-      if (nextX > TRACK_LENGTH) {
-        // Route Complete
-        // If Regular mode and passengers are waiting, loop again without resetting demand
-        const hasWaiting = Object.values(sim.waitingLoads).some(groups => groups.length > 0);
-        
-        if (sim.trainMode === 'regular' && hasWaiting) {
-             sim.message = "Route Complete. Sending Train 2...";
-             setMessage("Route Complete. Sending Train 2...");
-             initializePassengers('regular', true); // resetTrainOnly = true
+        if (nextX > TRACK_LENGTH) {
+            // Loop Logic for Regular
+            const hasWaiting = Object.values(sim.waitingLoads).some(groups => groups.length > 0);
+            if (hasWaiting) {
+                sim.message = "Looping Train...";
+                setMessage(sim.message);
+                initializePassengers('regular', true);
+            } else {
+                sim.message = "Resetting...";
+                setMessage(sim.message);
+                initializePassengers('regular');
+            }
         } else {
-             nextX = 0;
-             sim.lastStationId = null;
-             sim.message = "Route Complete. Resetting...";
-             setMessage("Route Complete. Resetting...");
-             initializePassengers(sim.trainMode); // Full reset
+            sim.trainX = nextX;
+            setTrainX(nextX);
         }
-      } else {
-        sim.trainX = nextX;
-        setTrainX(nextX);
-      }
+    }
+  };
+
+
+  // ==================================================================================
+  // BRANCH 2: LONG (10-CAR) LOGIC
+  // ==================================================================================
+  const runLongSimulation = (sim: typeof simRef.current, time: number, deltaTime: number) => {
+     const trainEffectiveLen = getTrainEffectiveLength('long');
+
+     // 1. Station Ops
+     if (sim.isWaiting) {
+       const elapsed = time - sim.waitStartTime;
+       const waitDuration = 3000 / sim.speedMultiplier;
+       const currentStationId = sim.activeStationId!;
+       const station = STATIONS.find(s => s.id === currentStationId);
+
+       // Doors
+       if (elapsed > 500 && elapsed < waitDuration && !sim.doorsOpen) {
+           sim.doorsOpen = true;
+           if (station) {
+               if (station.alignment === 'rear') {
+                   sim.activeBlockIds = [1, 3];
+                   sim.message = `${station.name}: Rear Align. Blocks 1 & 3 Open.`;
+               } else {
+                   // Front & All use Right Alignment (Blocks 2 & 3)
+                   sim.activeBlockIds = [2, 3];
+                   sim.message = `${station.name}: Front/Std Align. Blocks 2 & 3 Open.`;
+               }
+           }
+           setDoorsOpen(true);
+           setActiveBlockIds(sim.activeBlockIds);
+           setMessage(sim.message);
+       }
+
+       // Alighting
+       if (elapsed > 1000 && !sim.alightingProcessed) {
+           sim.alightingProcessed = true;
+           let alightedCount = 0;
+           const nextOccupancy = [...sim.carOccupancy];
+           for (let i = 0; i < nextOccupancy.length; i++) {
+               const occupant = nextOccupancy[i];
+               if (occupant && occupant.destId === currentStationId) {
+                   // Map index to block
+                   let blockId = 0;
+                   if (i < 3) blockId = 1;
+                   else if (i < 7) blockId = 3;
+                   else blockId = 2;
+
+                   if (sim.activeBlockIds.includes(blockId)) {
+                       nextOccupancy[i] = null;
+                       alightedCount++;
+                   }
+               }
+           }
+           sim.carOccupancy = nextOccupancy;
+           setCarOccupancy(nextOccupancy);
+           if (alightedCount > 0) setMessage(`Alighting: ${alightedCount} carloads.`);
+       }
+
+       // Boarding
+       if (elapsed > 1500 && !sim.boardingProcessed) {
+           sim.boardingProcessed = true;
+           const nextOccupancy = [...sim.carOccupancy];
+           const stationGroups = sim.waitingLoads[currentStationId] || [];
+           const remainingGroups: WaitingGroup[] = [];
+           let boardedTotal = 0;
+
+           stationGroups.forEach(group => {
+               if (!sim.activeBlockIds.includes(group.blockId)) {
+                   remainingGroups.push(group);
+                   return;
+               }
+
+               const blockIndices = getBlockIndices(group.blockId);
+               for (const idx of blockIndices) {
+                   if (idx < nextOccupancy.length && group.count > 0 && nextOccupancy[idx] === null) {
+                       nextOccupancy[idx] = { destId: group.destId, color: group.color };
+                       group.count--;
+                       boardedTotal++;
+                   }
+               }
+               
+               if (group.count > 0) remainingGroups.push(group);
+           });
+
+           sim.waitingLoads = { ...sim.waitingLoads, [currentStationId]: remainingGroups };
+           sim.carOccupancy = nextOccupancy;
+           setWaitingLoads(sim.waitingLoads);
+           setCarOccupancy(nextOccupancy);
+           if (boardedTotal > 0) setMessage(`Boarding: ${boardedTotal} carloads.`);
+       }
+
+       // Departure
+       if (elapsed > waitDuration) {
+           sim.doorsOpen = false;
+           setMessage("Doors closing...");
+           setDoorsOpen(false);
+           if (elapsed > waitDuration + 1000) {
+               sim.isWaiting = false;
+               sim.lastStationId = sim.activeStationId;
+               sim.activeStationId = null;
+               sim.activeBlockIds = [];
+               setMessage("Departing...");
+               setActiveStationId(null);
+               setActiveBlockIds([]);
+           }
+       }
+       return;
+     }
+
+     // 2. Movement (Long)
+     const moveAmount = (0.1 * deltaTime) * sim.speedMultiplier;
+     let nextX = sim.trainX + moveAmount;
+     let shouldStop = false;
+     let stopStation = null;
+     let snapX = 0;
+
+     for (const station of STATIONS) {
+         if (station.id === sim.lastStationId) continue;
+
+         let targetX = 0;
+         if (station.alignment === 'rear') {
+             targetX = station.positionX + STATION_PADDING;
+         } else {
+             // Front OR All: Right Align
+             targetX = (station.positionX + STATION_PIXEL_WIDTH - STATION_PADDING) - trainEffectiveLen;
+         }
+
+         if (sim.trainX < targetX && nextX >= targetX) {
+             shouldStop = true;
+             stopStation = station;
+             snapX = targetX;
+             break;
+         }
+     }
+
+     if (shouldStop && stopStation) {
+         sim.trainX = snapX;
+         sim.isWaiting = true;
+         sim.waitStartTime = time;
+         sim.boardingProcessed = false;
+         sim.alightingProcessed = false;
+         sim.activeStationId = stopStation.id;
+         setTrainX(snapX);
+         setActiveStationId(stopStation.id);
+         setMessage(`Arriving at ${stopStation.name}...`);
+     } else {
+         if (nextX > TRACK_LENGTH) {
+             sim.message = "Route Complete. Resetting...";
+             setMessage(sim.message);
+             initializePassengers('long');
+         } else {
+             sim.trainX = nextX;
+             setTrainX(nextX);
+         }
+     }
+  };
+
+
+  // ==================================================================================
+  // MAIN LOOP
+  // ==================================================================================
+  const updateSimulation = (time: number, deltaTime: number) => {
+    const sim = simRef.current;
+    if (!sim.isPlaying) return;
+
+    if (sim.trainMode === 'regular') {
+        runRegularSimulation(sim, time, deltaTime);
+    } else {
+        runLongSimulation(sim, time, deltaTime);
     }
   };
 

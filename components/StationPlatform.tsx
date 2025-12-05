@@ -4,7 +4,7 @@ import {
   STATION_PADDING, 
   BLOCK_WIDTH_3, 
   BLOCK_WIDTH_4, 
-  TRAIN_COUPLER_GAP,
+  TRAIN_COUPLER_GAP, 
   TRAIN_BLOCKS,
   STATIONS,
   REGULAR_TRAIN_BLOCKS,
@@ -32,32 +32,27 @@ const StandingPerson: React.FC<{ color: string }> = ({ color }) => (
 
 export const StationPlatform: React.FC<StationPlatformProps> = ({ name, id, alignment, positionX, isActive, waitingGroups, trainMode }) => {
   
-  // Dynamic width calculation to ensure exact alignment
-  const currentPlatformWidth = trainMode === 'regular' 
-    ? BLOCK_WIDTH_7 + (STATION_PADDING * 2) 
-    : STATION_PIXEL_WIDTH;
+  // --- Branch 1: Regular Logic (7-Car) ---
+  const getRegularZones = () => {
+    // The whole platform is one zone (Block 99)
+    // It is always left-aligned relative to the station anchor
+    return [
+      {
+        blockId: 99,
+        left: STATION_PADDING,
+        width: BLOCK_WIDTH_7
+      }
+    ];
+  };
 
-  // Define spatial zones using ABSOLUTE PIXEL positioning to align perfectly with train doors
-  const getBlockZones = () => {
-    
-    if (trainMode === 'regular') {
-        // Regular Train: The whole platform is one zone (Block 99).
-        return [
-            {
-                blockId: 99,
-                left: STATION_PADDING,
-                width: BLOCK_WIDTH_7
-            }
-        ];
-    }
-
+  // --- Branch 2: Long Logic (10-Car) ---
+  const getLongZones = () => {
     // 10-Car Train SDO Logic:
     // Rear Align: [Block 1] -- [Block 3] (Aligned Left)
     // Front Align: [Block 3] -- [Block 2] (Aligned Right relative to train, so Left on platform is Block 3)
-    // All Align: Treating as Left-Aligned (Rear-like) for 10-car to ensure consistent left-alignment visual requested by user.
-    //            So we use Blocks 1 & 3.
+    // All Align: Treated as Front Align (Blocks 3 & 2) for 10-car SDO to allow Block 2 access
     
-    if (alignment === 'rear' || alignment === 'all') {
+    if (alignment === 'rear') {
       // [Block 1 (3 cars)] -- [Block 3 (4 cars)]
       return [
         { 
@@ -72,7 +67,7 @@ export const StationPlatform: React.FC<StationPlatformProps> = ({ name, id, alig
         }  
       ];
     } else {
-      // Front Alignment: [Block 3 (4 cars)] -- [Block 2 (3 cars)]
+      // Front & All Alignment: [Block 3 (4 cars)] -- [Block 2 (3 cars)]
       return [
         { 
           blockId: 3, 
@@ -88,7 +83,13 @@ export const StationPlatform: React.FC<StationPlatformProps> = ({ name, id, alig
     }
   };
 
-  const zones = getBlockZones();
+  // Select logic based on mode
+  const zones = trainMode === 'regular' ? getRegularZones() : getLongZones();
+  
+  // Dynamic width calculation
+  const currentPlatformWidth = trainMode === 'regular' 
+    ? BLOCK_WIDTH_7 + (STATION_PADDING * 2) 
+    : STATION_PIXEL_WIDTH;
 
   return (
     <div
@@ -116,13 +117,14 @@ export const StationPlatform: React.FC<StationPlatformProps> = ({ name, id, alig
            } else {
                const reachable = futureStations.filter(s => {
                  // Logic: Is this block active at station s?
-                 // If 'all', we treat it as supporting 1 & 3 (Rear SDO)
-                 const activeBlocks = (s.alignment === 'rear' || s.alignment === 'all') ? [1, 3] : [2, 3];
+                 // Rear -> 1 & 3
+                 // Front/All -> 2 & 3
+                 const activeBlocks = (s.alignment === 'rear') ? [1, 3] : [2, 3];
                  return activeBlocks.includes(zone.blockId);
                });
                destText = reachable.length > 0
                  ? `To Stn ${reachable.map(s => s.id).join(',')}`
-                 : "No Service";
+                 : "";
            }
 
            return (
